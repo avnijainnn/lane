@@ -1,0 +1,32 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lane | Case {{f.id}}</title>
+<style>
+:root{font-family:Inter,system-ui,-apple-system,sans-serif;color:#122036;background:#f5f7fb}*{box-sizing:border-box}body{margin:0}
+.shell{max-width:1040px;margin:auto;padding:35px 24px}a{color:#1b60d1;text-decoration:none;font-weight:650}.logo{font-weight:850;font-size:26px;color:#145cd7;letter-spacing:-1px}h1{font-size:31px;margin-bottom:6px;letter-spacing:-.04em}h3{margin:0 0 15px;font-size:13px;text-transform:uppercase;letter-spacing:.09em;color:#7185a2}
+p{line-height:1.6;color:#697994}.status{font-weight:750;border-radius:16px;padding:7px 12px;background:#fff1d7;color:#9a6700;display:inline-block;text-transform:uppercase;font-size:12px}.status.verified{background:#e1f8eb;color:#137347}.status.contradicted{background:#ffe5e5;color:#a22f2f}.status.unknown{background:#e9edf5;color:#525f78}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.card{border:1px solid #e1e8f3;border-radius:15px;background:white;padding:22px;margin-top:17px;box-shadow:0 9px 25px #22395706}dt{font-size:11px;font-weight:750;text-transform:uppercase;letter-spacing:.08em;color:#7a8ca8;margin:19px 0 5px}dd{margin:0;font-size:15px;overflow-wrap:anywhere}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f6f8fc;border:1px solid #e5eaf2;border-radius:10px;padding:14px;font-size:13px}button{background:#165bd5;color:white;border:0;border-radius:9px;padding:12px 17px;font-weight:700;cursor:pointer}button.alt{background:#eef3fb;color:#2a5bc2}
+.note{font-size:13px;padding:15px;background:#fff9eb;border:1px solid #eddeb4;border-radius:10px}.meta{color:#8290a4;font-size:12px}.actions{display:flex;gap:10px;flex-wrap:wrap}
+@media(max-width:700px){.grid{grid-template-columns:1fr}.shell{padding:18px 15px}}
+</style></head><body><div class="shell"><div class="logo">lane.</div><p><a href="/">← All findings</a></p>
+<h1>{{client.name}}</h1><p>Call {{call.retell_call_id}} • {{call.started_at}} • Retell agent v{{call.agent_version}}</p>
+<span class="status {{f.state}}">{{f.state}}</span><p>{{f.reason}}</p>
+<div class="grid"><section class="card"><h3>Caller agreed to</h3>
+<dt>Extraction source</dt><dd>{% if extracted %}{{extracted.backend}} (from transcript; abstained: {{extracted.abstain}}){% else %}Legacy fixture; extraction not recorded{% endif %}</dd>
+<dt>Final accepted appointment</dt><dd>{{f.promised.get('final_start','Not extracted')}}</dd>
+<dt>Contact ID</dt><dd>{{f.promised.get('contact_id','Unknown')}}</dd>
+<dt>Calendar ID</dt><dd>{{f.promised.get('calendar_id','Unknown')}}</dd>
+<dt>Transcript evidence</dt><dd>{{f.promised.get('evidence','No extracted evidence')}}</dd>
+</section><section class="card"><h3>Calendar says</h3>
+{% if f.observed.get('records') %}{% for record in f.observed.get('records',[]) %}<dt>Appointment</dt><dd>{{record.get('id','unknown')}}</dd><dt>Time</dt><dd>{{record.get('startTime','unknown')}}</dd><dt>Status</dt><dd>{{record.get('status','unknown')}}</dd><dt>Contact / calendar</dt><dd>{{record.get('contactId','unknown')}} / {{record.get('calendarId','unknown')}}</dd>{% endfor %}
+{% else %}<p>No matching calendar observation yet.</p>{% endif %}
+{% for error in f.observed.get('errors',[]) %}<p>{{error}}</p>{% endfor %}
+</section></div>
+<div class="card"><h3>Next action</h3>
+{% if demo_mode %}<div class="note"><strong>SYNTHETIC DEMO:</strong> The example calendar is intentionally wrong. The action below changes only Lane's synthetic demo record, not HighLevel.</div><br>{% endif %}
+<div class="actions">{% if can_simulate_fix and f.state != 'verified' %}<form action="/demo/fix/{{f.id}}" method="post"><button class="alt">Simulate operator fix (demo)</button></form>{% endif %}
+{% if f.type == 'booking' %}<form action="/findings/{{f.id}}/recheck" method="post"><button>Re-check calendar</button></form>{% endif %}</div>
+<p>For a real pilot, correct the appointment in HighLevel yourself, then click Re-check. Lane does not write to HighLevel.</p></div>
+<div class="card"><h3>Version and evidence</h3><dt>Manifest hash at call start</dt><dd>{{f.manifest_hash or 'No approved manifest in force'}}</dd>
+<dt>Transcript (redacted)</dt><pre>{{call.transcript}}</pre><dt>Observation history</dt>
+{% for item in obs %}<div class="meta">{{item.observed_at}} | {{item.source}} | {{item.data.get('stage')}}</div><pre>{{item.data}}</pre>{% else %}<p>Not yet checked.</p>{% endfor %}
+</div></div></body></html>

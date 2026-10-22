@@ -1,0 +1,26 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lane | Findings</title>
+<style>
+:root{font-family:Inter,system-ui,-apple-system,sans-serif;color:#122036;background:#f5f7fb}
+*{box-sizing:border-box}body{margin:0}.shell{max-width:1140px;margin:0 auto;padding:32px 22px}
+header{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
+.logo{font-weight:850;font-size:27px;letter-spacing:-1.4px;color:#1756d1}.eyebrow{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#70819b;font-weight:700}
+h1{font-size:29px;margin:26px 0 9px;letter-spacing:-.04em}p{color:#63728a;line-height:1.55}
+.panel{border:1px solid #e1e7ef;border-radius:16px;background:white;overflow:hidden;margin-top:27px;box-shadow:0 9px 25px #18305107}
+table{width:100%;border-collapse:collapse}th{text-transform:uppercase;letter-spacing:.08em;font-size:11px;text-align:left;color:#7c8ba2;background:#fafbfd}
+th,td{padding:18px;border-bottom:1px solid #edf0f5}tr:last-child td{border:0}
+a{color:#1c5dd6;text-decoration:none;font-weight:650}a:hover{text-decoration:underline}
+.chip{display:inline-block;padding:5px 10px;border-radius:100px;background:#edf2fa;color:#3a5682;font-size:12px;font-weight:750}
+.chip.pending{background:#fff4db;color:#936207}.chip.contradicted{background:#fee9e9;color:#a53532}
+.chip.verified{background:#e2f8eb;color:#177344}.chip.unknown{background:#e9e9f1;color:#4c5570}
+button{background:#1756d1;color:white;border:0;border-radius:9px;padding:11px 16px;font-weight:700;cursor:pointer}
+.warning{background:#fef7e8;border:1px solid #f2dba0;padding:13px 17px;border-radius:12px;color:#805b10;font-size:13px;margin-top:20px}
+small{color:#8994a7}
+@media(max-width:700px){th:nth-child(3),td:nth-child(3){display:none}th,td{padding:12px 9px}.shell{padding:20px 14px}}
+</style></head><body><div class="shell">
+<header><div><div class="logo">lane<span style="color:#7a8ba6">.</span></div><div class="eyebrow">Voice-agent commitment verification</div></div><div class="eyebrow">PHASE 0 / FINDINGS</div></header>
+<h1>Findings queue</h1><p><a href="/comparison" style="margin-left:12px">Compare extractors</a><a href="/evaluation">See dataset extraction evaluation →</a></p><p><a href="/accountability" style="margin-right:12px">Agency accountability →</a> Check what the agent promised against what the calendar actually contains. Every verdict carries a manifest hash and the agent version.</p>
+{% if demo_mode %}<div class="warning"><strong>Demo mode enabled.</strong> Synthetic fixtures are labelled; no real HighLevel calendar is changed. <form action="/demo/seed" method="post" style="display:inline;margin-left:8px"><button>Load example</button></form></div>{% endif %}
+<div class="panel"><table><thead><tr><th>Client / call</th><th>Finding</th><th>State</th><th>Manifest</th><th>Action</th></tr></thead><tbody>
+{% for f, call, client in rows %}<tr><td><strong>{{client.name}}</strong><br><small>{{call.retell_call_id}}</small></td><td>{{f.type.replace('_',' ').title()}}<br><small>{{f.reason[:65]}}</small></td><td><span class="chip {{f.state}}">{{f.state.upper()}}</span></td><td><small>{{(f.manifest_hash or 'unknown')[:12]}}</small><br><small>agent v{{f.agent_version}}</small></td><td><a href="/findings/{{f.id}}">Review →</a></td></tr>
+{% else %}<tr><td colspan="5">No findings yet. Load a synthetic fixture or connect an agent and approve a manifest.</td></tr>{% endfor %}
+</tbody></table></div><p><small>Read-only for real customer systems • No auto-fixes • Phase 0 prototype</small></p></div></body></html>

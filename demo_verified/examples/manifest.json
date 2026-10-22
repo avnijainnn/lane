@@ -1,0 +1,9 @@
+{
+  "approved_agent_version":"14",
+  "approver":"Agency founder",
+  "approver_role":"agency",
+  "never_ask":["card_number","password","otp"],
+  "never_promise":["discount","refund","guarantee"],
+  "deliverable_promises":["sms_confirmation"],
+  "allowed_actions":["book"]
+}

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lane | Extractor comparison</title>
+<style>
+:root{font-family:Inter,system-ui,sans-serif;background:#f5f7fb;color:#162339}*{box-sizing:border-box}body{margin:0}.shell{max-width:1200px;margin:auto;padding:35px 20px}h1{font-size:29px;letter-spacing:-.04em}a{color:#1c60d1;font-weight:650;text-decoration:none}p,small{color:#64748b;line-height:1.5} .box{border:1px solid #e2e8f0;border-radius:14px;padding:18px;background:white}.notice{background:#fff4dc;color:#80590b;padding:14px;border-radius:12px;margin:20px 0}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin:20px 0}.big{font-size:26px;font-weight:800}table{width:100%;border-collapse:collapse;background:white;border-radius:12px;overflow:hidden}th,td{padding:12px;border-bottom:1px solid #e7ecf3;text-align:left;font-size:13px;vertical-align:top}th{background:#f9fafb;color:#64748b}.good{color:#118449;font-weight:750}.bad{color:#bb3c34;font-weight:750}.scroll{overflow:auto}code{overflow-wrap:anywhere}@media(max-width:650px){h1{font-size:23px}}
+</style></head><body><main class="shell"><a href="/accountability">← Agency overview</a><h1>Rules vs LLM: same conversations</h1>
+<p>Both extractors receive the same transcript, timezone, and call start time. Gold labels are withheld until scoring. An abstention counts as incorrect in exact accuracy.</p>
+<div class="notice"><strong>Evaluation only.</strong> Public or synthetic transcript results never prove the appointment was written to HighLevel. The bundled challenge is synthetic, not a customer study.</div>
+{% if report %}
+<p><strong>{{ report.dataset }}</strong> · SHA-256 <code>{{ report.dataset_sha256[:16] }}…</code></p>
+<div class="metrics">
+{% for name,info in report.backends.items() %}
+<div class="box"><small>{{ name | upper }} — {{ info.model }}</small><div class="big">{{ info.metrics.extraction_correct }}/{{ info.metrics.total }}</div><p>Exact correct · coverage {{info.metrics.covered}}/{{info.metrics.total}}</p>
+<small>False bookings: {{ info.metrics.outcomes.get('false_booking',0) }} · wrong times: {{ info.metrics.outcomes.get('wrong_time',0) }} · abstentions: {{info.metrics.outcomes.get('abstained',0)}}</small></div>
+{% endfor %}
+</div>
+<div class="scroll"><table><thead><tr><th>Scenario</th><th>Expected</th>{% for name in report.backends %}<th>{{name}}</th>{% endfor %}</tr></thead><tbody>
+{% for case in report.cases %}<tr><td>{{case.id}}</td><td>{{case.gold.final_start if case.gold.confirmed else 'No booking'}}</td>
+{% for name in report.backends %}{% set entry=case[name] %}
+<td class="{{'good' if entry.exact_correct else 'bad'}}">{{entry.outcome}}<br><small>{{entry.final_start if entry.confirmed else ('Abstained' if entry.abstain else 'No booking')}}</small></td>
+{% endfor %}</tr>{% endfor %}
+</tbody></table></div>
+{% else %}
+<div class="box"><strong>No comparison report yet.</strong><p>Run <code>python -m scripts.compare_extractors datasets/extraction_challenge.jsonl --backends rules,groq,groq_guarded,groq_events</code> from the project directory, or <code>--backends rules,gemini,gemini_events</code> with <code>GEMINI_API_KEY</code>. Groq requires a valid <code>GROQ_API_KEY</code>. Refresh this page afterward.</p>
+<p>Without a key, you can generate a baseline using <code>--backends rules</code>. The dashboard will not display invented LLM scores.</p></div>
+{% endif %}
+<section class="box" style="margin-top:25px"><h2>Public corpus runs — UNLABELLED</h2>
+<p>These are saved processing statistics, <strong>not accuracy</strong>. Missing examples and provider failures are excluded from evaluated counts.</p>
+{% if public_reports %}<table><thead><tr><th>Report</th><th>Backend</th><th>Evaluated</th><th>Provider errors</th><th>Remaining</th></tr></thead><tbody>
+{% for r in public_reports %}<tr><td><code>{{r.name}}</code></td><td>{{r.backend}}</td><td>{{r.evaluated}} / {{r.requested}}</td><td>{{r.errors}}</td><td>{{r.remaining}}</td></tr>{% endfor %}
+</tbody></table>{% else %}<p>No recognized public benchmark report yet. Generate a checkpoint with <code>scripts.public_benchmark stress</code>.</p>{% endif %}</section>
+</main></body></html>
