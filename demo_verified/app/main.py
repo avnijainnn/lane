@@ -16,6 +16,7 @@ from .manifest import hash_policy, manifest_for_start
 from .redact import text as redact_text, obj as redact_obj
 from .time_utils import to_utc
 from .pipeline import process_call
+from .public_report import public_sgd_view
 from .verify import check_finding, process_due_jobs
 
 @asynccontextmanager
@@ -262,7 +263,9 @@ def comparison_dashboard(request: Request, _=Depends(require_dashboard)):
     public_reports = []
     # Read only a few configured report names; do not accept arbitrary user paths.
     for name in ('sgd_groq_events_recovery.json','sgd_rules_same100.json','sgd_rules_1000.json',
-                 'sgd_gemini_events.json','sgd_gemini.json'):
+                 'sgd_gemini_events.json','sgd_gemini.json',
+                 'sgd_new_relevant_gemini.json','sgd_new_relevant_rules.json',
+                 'sgd_gemini_events_full.json','sgd_full_gemini_100.json'):
         path = root / name
         if not path.is_file() or path.stat().st_size > 8_000_000:
             continue
@@ -275,7 +278,8 @@ def comparison_dashboard(request: Request, _=Depends(require_dashboard)):
                    'abstentions':item.get('abstentions',0)})
         except (ValueError,OSError):
             pass
-    return templates.TemplateResponse(request, 'comparison.html', {'report': results,'public_reports':public_reports})
+    sgd = public_sgd_view(Path(__file__).resolve().parents[1])
+    return templates.TemplateResponse(request, 'comparison.html', {'report': results,'public_reports':public_reports,'sgd':sgd})
 
 @app.post('/findings/{finding_id}/recheck')
 def recheck_form(finding_id:int, _=Depends(require_dashboard), db:Session=Depends(db_session)):

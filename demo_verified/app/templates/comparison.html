@@ -3,9 +3,60 @@
 <title>Lane | Extractor comparison</title>
 <style>
 :root{font-family:Inter,system-ui,sans-serif;background:#f5f7fb;color:#162339}*{box-sizing:border-box}body{margin:0}.shell{max-width:1200px;margin:auto;padding:35px 20px}h1{font-size:29px;letter-spacing:-.04em}a{color:#1c60d1;font-weight:650;text-decoration:none}p,small{color:#64748b;line-height:1.5} .box{border:1px solid #e2e8f0;border-radius:14px;padding:18px;background:white}.notice{background:#fff4dc;color:#80590b;padding:14px;border-radius:12px;margin:20px 0}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin:20px 0}.big{font-size:26px;font-weight:800}table{width:100%;border-collapse:collapse;background:white;border-radius:12px;overflow:hidden}th,td{padding:12px;border-bottom:1px solid #e7ecf3;text-align:left;font-size:13px;vertical-align:top}th{background:#f9fafb;color:#64748b}.good{color:#118449;font-weight:750}.bad{color:#bb3c34;font-weight:750}.scroll{overflow:auto}code{overflow-wrap:anywhere}@media(max-width:650px){h1{font-size:23px}}
-</style></head><body><main class="shell"><a href="/accountability">← Agency overview</a><h1>Rules vs LLM: same conversations</h1>
-<p>Both extractors receive the same transcript, timezone, and call start time. Gold labels are withheld until scoring. An abstention counts as incorrect in exact accuracy.</p>
-<div class="notice"><strong>Evaluation only.</strong> Public or synthetic transcript results never prove the appointment was written to HighLevel. The bundled challenge is synthetic, not a customer study.</div>
+</style></head><body><main class="shell"><a href="/accountability">← Agency overview</a><h1>Conversation extraction benchmarks</h1><p>Start with your most recent 100-conversation public-dataset run below. The older eight-case synthetic check is kept separately for debugging.</p>
+
+<div class="notice"><strong>Evaluation only.</strong> Public or synthetic transcript results never prove the appointment was written to HighLevel. There are no verified calendar outcomes or manually reviewed truth labels for this SGD sample.</div>
+<section class="box" id="sgd100" style="margin-top:25px">
+<h2>SGD 100 · Gemini vs Rules</h2><p><strong>Not accuracy:</strong> “processed” means a prediction attempt was saved. An abstention means the extractor declined to make a confident booking judgment; it does not mean the conversation had no booking.</p>
+<p><strong>Unlabelled public dialogue sample.</strong> Compare the models on exactly the same conversation IDs. This table shows decisions, provider errors and abstentions—not accuracy or verified calendar writes. Date/time fields use an artificial benchmark clock; the reports only store whether a time was extracted.</p>
+{% if sgd.total %}
+<p><strong>{{sgd.total}} candidates</strong> loaded from <code>sgd_new_relevant_100.jsonl</code>.</p>
+<div class="metrics">
+{% for backend in ('gemini','rules') %}
+<div class="box"><small>{{backend|upper}}</small>
+{% if backend in sgd.reports %}
+<div class="big">{{sgd.reports[backend].evaluated}} / {{sgd.total}}</div>
+<small>Evaluated · {{sgd.reports[backend].errors}} provider errors · {{sgd.reports[backend].unprocessed}} unprocessed</small><p>Predicted bookings: {{sgd.reports[backend].predicted_bookings}} · abstentions: {{sgd.reports[backend].abstentions}}</p>
+{% else %}
+<div class="big">No report</div><small>Generate the {{backend}} checkpoint to compare.</small>
+{% endif %}
+</div>
+{% endfor %}
+<div class="box"><small>COMPARISON · NO GOLD LABELS</small><div class="big">{{sgd.comparable}} comparable</div>
+<small>{{sgd.paired}} jointly evaluated · {{sgd.abstention_affected}} affected by abstention</small><p>{{sgd.agreements}} booking agreements · {{sgd.disagreements}} booking disagreements · {{sgd.time_presence_disagreements}} time-presence disagreements</p></div>
+</div>
+{% if 'gemini' in sgd.reports and sgd.reports['gemini'].evaluated and sgd.reports['gemini'].abstentions * 2 >= sgd.reports['gemini'].evaluated %}
+<div class="notice"><strong>Many Gemini abstentions:</strong> {{sgd.reports['gemini'].abstentions}} of {{sgd.reports['gemini'].evaluated}} evaluated conversations. The checkpoint saves only booleans, not the explanation or extracted timestamp. This is a limitation of the current benchmark/reporting pipeline, not evidence the model is inaccurate. SGD frequently contains relative dates, 24-hour times, ordinal dates, and colloquial clock phrases that the strict validator cannot ground.</div>
+{% endif %}
+{% if 'rules' not in sgd.reports %}<div class="notice">Your Gemini checkpoint is present, but the rules checkpoint is missing. Run <code>python -m scripts.public_benchmark stress datasets/public/sgd_new_relevant_100.jsonl --backend rules --n 100 --output datasets/reports/sgd_new_relevant_rules.json</code> (add <code>--resume</code> if that file already exists). Refresh this page.</div>{% endif %}
+{% if 'gemini' not in sgd.reports %}<div class="notice">No matching <code>sgd_new_relevant_gemini.json</code> checkpoint found. Existing reports have not been deleted; this page reads only that known filename and matching candidate IDs.</div>{% endif %}
+<label for="sgd-filter" style="font-weight:650;display:block;margin:18px 0 10px">Filter conversations</label>
+<select id="sgd-filter" style="min-width:240px;max-width:350px;padding:9px;border-radius:8px;border:1px solid #cbd5e1">
+<option value="all">All cases</option><option value="disagreement">Disagreements</option><option value="abstention">Abstentions</option><option value="provider_error">Provider errors</option><option value="unpaired">Unpaired / not processed</option><option value="agreement">Agreements</option>
+</select>
+<small id="sgd-visible" style="margin-left:12px"></small>
+<div class="scroll" style="margin-top:15px"><table id="sgd-table"><thead><tr><th>#</th><th>Conversation</th><th>Domain</th><th>Gemini</th><th>Rules</th><th>Comparison</th></tr></thead><tbody>
+{% for c in sgd.cases %}<tr data-group="{{c.compare_status}}">
+<td>{{loop.index}}</td><td><code>{{c.id}}</code>{% if c.expression_hints %}<br><small>Parser-limit candidates: {{c.expression_hints|join(', ')}}</small>{% endif %}<details><summary>Read transcript</summary><pre style="white-space:pre-wrap;max-width:570px;font-size:12px">{{c.transcript}}</pre></details></td><td>{{c.domain}}</td>
+{% for b in (c.gemini,c.rules) %}<td>
+{% if b.status == 'evaluated' %}
+{% if b.abstain %}<span class="bad">Abstained</span>
+{% elif b.predicted_booking %}<span class="good">Booking predicted</span>
+{% else %}No booking predicted{% endif %}
+<br><small>Time extracted: {{'yes' if b.has_time else 'no'}}</small>{% if b.abstain %}<br><small>Cause: {{b.reason if b.reason else "not saved in this checkpoint"}}</small>{% endif %}
+{% elif b.status == 'provider_error' %}<span class="bad">Provider error</span><br><small>{{b.diagnostic or b.error_kind or 'Unavailable'}}</small>
+{% else %}<small>Not processed</small>{% endif %}
+</td>{% endfor %}
+<td>{% if c.compare_status == 'disagreement' %}<span class="bad">Disagreed</span>{% elif c.compare_status == 'agreement' %}<span class="good">Agreed</span>{% else %}{{c.compare_status|replace('_',' ')|title}}{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>
+<script>
+(function(){const select=document.getElementById('sgd-filter'),rows=Array.from(document.querySelectorAll('#sgd-table tbody tr')),counter=document.getElementById('sgd-visible');function apply(){let shown=0;for(const row of rows){const ok=select.value==='all'||row.dataset.group===select.value;row.hidden=!ok;if(ok)shown++;}counter.textContent=shown+' / '+rows.length+' conversations shown';}select.addEventListener('change',apply);apply();})();
+</script>
+{% else %}
+<p>No SGD sample is present at <code>datasets/public/sgd_new_relevant_100.jsonl</code>. Generate/import that file first.</p>
+{% endif %}
+</section>
+<details class="box" style="margin-top:25px" id="legacy-synthetic"><summary style="font-weight:700;cursor:pointer">Older eight-conversation synthetic benchmark (expand)</summary><div style="margin-top:18px">
 {% if report %}
 <p><strong>{{ report.dataset }}</strong> · SHA-256 <code>{{ report.dataset_sha256[:16] }}…</code></p>
 <div class="metrics">
@@ -24,9 +75,13 @@
 <div class="box"><strong>No comparison report yet.</strong><p>Run <code>python -m scripts.compare_extractors datasets/extraction_challenge.jsonl --backends rules,groq,groq_guarded,groq_events</code> from the project directory, or <code>--backends rules,gemini,gemini_events</code> with <code>GEMINI_API_KEY</code>. Groq requires a valid <code>GROQ_API_KEY</code>. Refresh this page afterward.</p>
 <p>Without a key, you can generate a baseline using <code>--backends rules</code>. The dashboard will not display invented LLM scores.</p></div>
 {% endif %}
+
+</div></details>
 <section class="box" style="margin-top:25px"><h2>Public corpus runs — UNLABELLED</h2>
 <p>These are saved processing statistics, <strong>not accuracy</strong>. Missing examples and provider failures are excluded from evaluated counts.</p>
 {% if public_reports %}<table><thead><tr><th>Report</th><th>Backend</th><th>Evaluated</th><th>Provider errors</th><th>Remaining</th></tr></thead><tbody>
 {% for r in public_reports %}<tr><td><code>{{r.name}}</code></td><td>{{r.backend}}</td><td>{{r.evaluated}} / {{r.requested}}</td><td>{{r.errors}}</td><td>{{r.remaining}}</td></tr>{% endfor %}
 </tbody></table>{% else %}<p>No recognized public benchmark report yet. Generate a checkpoint with <code>scripts.public_benchmark stress</code>.</p>{% endif %}</section>
+
+
 </main></body></html>
