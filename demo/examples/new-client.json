@@ -1,0 +1,7 @@
+{
+  "name":"Pilot Client",
+  "retell_agent_id":"agent_REPLACE_ME",
+  "highlevel_location_id":"LOCATION_REPLACE_ME",
+  "timezone":"America/Chicago",
+  "calendar_id":"CALENDAR_REPLACE_ME"
+}

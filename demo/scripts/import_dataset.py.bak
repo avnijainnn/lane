@@ -1,0 +1,203 @@
+"""Import explicit synthetic paired call+calendar fixtures into Lane Phase 0.
+
+Uses the *same* process_call and check_finding as live Lane, but deliberately
+extracts FROM THE TRANSCRIPT before comparing with held-out labels.
+The calendar read adapter queries DemoAppointment instead of external HighLevel.
+
+Example:
+    python -m scripts.import_dataset datasets/booking_cases.jsonl
+"""
+import argparse
+import json
+import os
+from datetime import timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import select
+
+from app.db import (SessionLocal, Client, Manifest, Call, Finding, Job,
+                    DemoAppointment, ExtractionResult, DatasetEvaluation, init_db, now)
+from app.main import store_call
+from app.manifest import hash_policy
+from app.pipeline import process_call
+from app.verify import check_finding
+from app.evaluation import correct_extraction, report
+
+AGENT_ID = 'agent_dataset_lane'
+CALENDAR_ID = 'cal_dataset'
+LOCATION_ID = 'loc_dataset'
+TZ = 'America/Chicago'
+
+
+def _install_client(db):
+    client = db.scalar(select(Client).where(Client.retell_agent_id == AGENT_ID))
+    if client:
+        if not client.is_demo:
+            raise ValueError('Refusing to use a real CRM client in dataset mode')
+        manifest = db.scalar(select(Manifest).where(Manifest.client_id == client.id).order_by(Manifest.version.desc()))
+        if not manifest:
+            raise ValueError('Dataset client has no approved manifest')
+        return client, manifest
+    client = Client(name='Dataset Clinic (SYNTHETIC)',retell_agent_id=AGENT_ID,
+                    highlevel_location_id=LOCATION_ID,timezone=TZ,
+                    calendar_id=CALENDAR_ID,is_demo=True)
+    db.add(client)
+    db.flush()
+    body = {
+        'manifest_id':f'client-{client.id}', 'version':1,
+        'agent':{'platform':'retell','agent_id':AGENT_ID,'approved_agent_version':'14'},
+        'record':{'system':'highlevel_mock','location_id':LOCATION_ID,'calendars':[CALENDAR_ID]},
+        'timezone':TZ, 'allowed_actions':['book'],
+        'deliverable_promises':['sms_confirmation'], 'never_ask':['card_number','password','otp'],
+        'never_promise':['discount','refund']
+    }
+    manifest = Manifest(client_id=client.id,version=1,body=body,sha256=hash_policy(body),
+                        approved_agent_version='14',approver='Dataset fixture creator',
+                        approver_role='agency',effective_from=now()-timedelta(days=1))
+    db.add(manifest)
+    db.flush()
+    return client, manifest
+
+
+def validate_case(case, n):
+    if not isinstance(case, dict): raise ValueError(f'Line {n}: expected JSON object')
+    for key in ('id','transcript','commitment','expected_state'):
+        if key not in case: raise ValueError(f'Line {n}: missing {key}')
+    if not isinstance(case['id'],str) or not case['id'].replace('_','').isalnum():
+        raise ValueError(f'Line {n}: id must be an alphanumeric/underscore string')
+    if not isinstance(case['transcript'],str): raise ValueError(f'Line {n}: transcript must be text')
+    if not isinstance(case['commitment'],dict): raise ValueError(f'Line {n}: commitment must be an object')
+    if case['expected_state'] not in {'verified','contradicted','pending','unknown','none'}:
+        raise ValueError(f'Line {n}: invalid expected_state')
+    if case.get('stage','60m') not in {'2m','15m','60m'}:
+        raise ValueError(f'Line {n}: invalid stage')
+    if case.get('record') is not None and not isinstance(case['record'],dict):
+        raise ValueError(f'Line {n}: record must be an object or null')
+    if case.get('after_fix') is not None and not isinstance(case['after_fix'],dict):
+        raise ValueError(f'Line {n}: after_fix must be an object or null')
+    if len(case['transcript']) > 18000: raise ValueError(f'Line {n}: transcript is too long')
+
+
+def import_cases(path: str, *, backend: str = "rules", prefix: str = "dataset_extracted_v2"):
+    if backend not in {"rules", "openai"}:
+        raise ValueError("backend must be rules or openai")
+    if not prefix.replace("_", "").isalnum():
+        raise ValueError("prefix should be letters, digits and underscores")
+    if os.getenv('DEMO_MODE','false').lower() != 'true':
+        raise RuntimeError('Set DEMO_MODE=true. Dataset importer will not run in live mode.')
+    cases = []
+    for n, line in enumerate(Path(path).read_text(encoding='utf-8').splitlines(),start=1):
+        if not line.strip(): continue
+        case = json.loads(line)
+        validate_case(case,n)
+        cases.append(case)
+    if not cases: raise ValueError('No fixture records found')
+    if len({c['id'] for c in cases}) != len(cases):
+        raise ValueError('Fixture IDs must be unique')
+
+    init_db()
+    rows = []
+    scored = []
+    with SessionLocal() as db:
+        client, manifest = _install_client(db)
+        db.commit()
+        for case in cases:
+            call_id = f'{prefix}_{backend}_{case["id"]}'
+            existing = db.scalar(select(Call).where(Call.retell_call_id == call_id))
+            if existing:
+                frozen = db.scalar(select(DatasetEvaluation).where(DatasetEvaluation.call_id == existing.id))
+                rows.append((case['id'], 'already imported', case['expected_state'], 'SKIP'))
+                # Existing records are never reprocessed with a new extractor.
+                # Use --prefix another_name to run a fresh experimental comparison.
+                continue
+            # IMPORTANT: hidden label `commitment` is *not* supplied to process_call.
+            # Simulated records are supplied only to the independent verifier.
+            aid = case.get('appointment_id') or f'evt_{case["id"]}'
+            contact_id = case.get('contact_id', f'contact_{case["id"]}')
+            if case.get('record') is not None:
+                record = {**case['record'], 'id': case['record'].get('id',aid)}
+                if db.get(DemoAppointment,record['id']):
+                    raise ValueError(f'Duplicate mock appointment ID {record["id"]}')
+                db.add(DemoAppointment(id=record['id'],client_id=client.id,record=record))
+            db.flush()
+            start = now()-timedelta(minutes=5)
+            end = now()-timedelta(minutes=3)
+            tool_arguments = {'calendarId': CALENDAR_ID}
+            if contact_id: tool_arguments['contactId'] = contact_id
+            trace = [{'tool_name':'create_appointment',
+                      'arguments':tool_arguments,'result':{'eventId':aid}}]
+            payload = {'event':'call_ended','call':{
+                'call_id':call_id, 'agent_id':AGENT_ID,
+                'agent_version':case.get('agent_version',14),
+                'start_timestamp':int(start.timestamp()*1000),
+                'end_timestamp':int(end.timestamp()*1000),
+                'transcript':case['transcript'],
+                'transcript_with_tool_calls':trace}}
+            ingested = store_call(db,payload,demo=True)
+            call = db.get(Call,ingested['id'])
+            process_call(db, call, extraction_backend=backend)
+            db.flush()
+            prediction = db.scalar(select(ExtractionResult).where(ExtractionResult.call_id == call.id))
+            correct = correct_extraction(case['commitment'], prediction)
+            finding = db.scalar(select(Finding).where(Finding.call_id == call.id,Finding.type == 'booking'))
+            if finding and finding.state == 'pending':
+                check_finding(db,finding,case.get('stage','60m'))
+            if finding and case.get('after_fix'):
+                fix = case['after_fix']
+                if db.get(DemoAppointment,aid):
+                    appointment = db.get(DemoAppointment,aid)
+                    appointment.record = fix
+                else:
+                    db.add(DemoAppointment(id=aid,client_id=client.id,record=fix))
+                db.flush()
+                check_finding(db,finding,'manual')
+            # Imported test cases are snapshots, not real timed jobs. Stop worker
+            # from changing these frozen evaluation results after import.
+            if finding:
+                for job in db.scalars(select(Job).where(Job.finding_id == finding.id)):
+                    job.done = True
+            outcome = finding.state if finding else 'none'
+            expected = case['expected_state']
+            state_ok = outcome == expected
+            db.add(DatasetEvaluation(
+                call_id=call.id, scenario_id=case['id'], dataset=Path(path).name,
+                backend=backend, expected_confirmed=bool(case['commitment']['confirmed']),
+                expected_start=case['commitment'].get('final_start'), expected_state=expected,
+                extraction_correct=correct, state_correct=state_ok,
+            ))
+            scored.append({
+                'case':case['id'], 'prediction':prediction, 'gold':case['commitment'],
+                'extraction_correct':correct, 'state_correct':state_ok,
+            })
+            rows.append((case['id'],outcome,expected,'PASS' if state_ok else 'FAIL'))
+            db.commit()
+
+    print(f'Imported fixture dataset: {Path(path).name}\n')
+    for case_id,actual,expected,status in rows:
+        print(f'{case_id:24} actual={actual:14} expected={expected:14} {status}')
+    tested = [r for r in rows if r[3] in ('PASS','FAIL')]
+    passed = sum(1 for r in tested if r[3]=='PASS')
+    metrics = report(scored)
+    print(f'\nVerification states matching labels: {passed}/{len(tested)} (SCRIPTED synthetic cases)')
+    if scored:
+        print(f'Extraction backend: {backend}')
+        print(f'Extraction coverage: {metrics["covered"]}/{metrics["total"]}')
+        print(f'Exact extraction correctness, abstentions counted wrong: {metrics["extraction_correct"]}/{metrics["total"]}')
+        print(f'Correct extraction among non-abstained: '
+              f'{metrics["extraction_accuracy_covered"]:.1%}' if metrics['extraction_accuracy_covered'] is not None else 'No covered predictions')
+    print('These are synthetic scripted evaluation cases, NOT measured real-world accuracy.')
+    # Verification-state mismatches can come from inaccurate extraction; keep
+    # the data available for investigation instead of hiding them behind exceptions.
+    return rows
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('dataset',help='JSONL file containing synthetic paired call+record fixtures')
+    parser.add_argument('--backend', choices=['rules','openai'], default='rules',
+                        help='rules = offline baseline, openai = strict-schema LLM; labels always held out')
+    parser.add_argument('--prefix', default='dataset_extracted_v2',
+                        help='Change this to compare a new run without reusing old imported call IDs')
+    args = parser.parse_args()
+    import_cases(args.dataset, backend=args.backend, prefix=args.prefix)
